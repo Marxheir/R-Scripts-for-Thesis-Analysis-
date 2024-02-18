@@ -1,0 +1,261 @@
+---
+title: "Thesis Analysis R Notebook"
+Author: "Olowookere Oluwatosin Olawale"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+### SPATIAL ANALYSIS ###
+# Assuming df is your data frame with columns lat, lon, and health_outcome
+# Install required packages if not already installed
+install.packages(c("sf", "sp", "spdep", "dbscan"))
+
+# Load libraries
+library(sf)
+library(sp)
+library(spdep)
+library(dbscan)
+library(dpm)
+library(lavaan)
+library(tidyverse)
+# Create a spatial object
+coordinates(df) <- c("lon", "lat")
+proj4string(df) <- CRS("+proj=longlat +datum=WGS84")
+
+# Option 1: Cluster Analysis using DBSCAN
+dbscan_result <- dbscan::dbscan(merged_data[, model_vars], eps = 0.1, MinPts = 5)
+moran.test(merged_data$Zscore_Reprd_index)
+
+```
+
+
+```{r}
+#Zscore_Reprd_index, Zscore_InfDis_index, Zscore_Mental_index, Zscore_Nutrit_index, Zscore_EnvDeath_index, Zscore_HSCR_index 
+
+UnitFE <- plm::plm(Zscore_EnvDeath_index ~ plm::lag(log(oda_disb + 1), 1) +
+                   log(govt_hth_spnd_1) +  log(GDP_per_cap) + log(Pop_tot) 
+                 + log_ae + log(External_debt_stock) +
+                 + log(Trade) + cri_score + log_gov + FDI + log(Pop_densty) + time_var, 
+                 data = merged_data, 
+                 index = c("iso3c", "periods"), model = "within", effect = "individual")
+
+
+timeFE <- plm::plm(Zscore_Nutrit_index ~ plm::lag(log(oda_disb + 1), 1) +
+                   log(govt_hth_spnd_1) +  log(GDP_per_cap) + log(Pop_tot) 
+                 + log_ae + log(External_debt_stock) +
+                 + log(Trade) + cri_score + log_gov + FDI + log(Pop_densty), 
+                 data = merged_data, 
+                 index = c("iso3c", "periods"), model = "within", effect = "time")
+
+
+TwaysFE <- plm::plm(Zscore_Mental_index ~ plm::lag(log(oda_disb + 1), 1) +
+                   log(govt_hth_spnd_1) +  log(GDP_per_cap) + log(Pop_tot) 
+                 + log_ae + log(External_debt_stock) +
+                 + log(Trade) + cri_score + log_gov + FDI + log(Pop_densty), 
+                 data = merged_data, 
+                 index = c("iso3c", "periods"), model = "within", effect = "twoway")
+```
+```{r}
+## Model Tests 
+library(sandwich)
+library(plm)
+library(stats)
+library(lmtest)
+#Unit Effect Tests 
+plmtest(UnitFE, effect = "individual") ## Very significant 
+plmtest(timeFE, effect = "time") # Test effect only significant for mental burden at 5%
+pbgtest(UnitFE) ## Serial Auto correlation is present in all models
+pcdtest(UnitFE) ## Cross-sectional dependency
+
+## Therefore, all models must be estimated with corrected standard error 
+coeftest(TwaysFE, 
+         vcov(vcovHC(TwaysFE, method = "arellano", type = "HC3")))
+
+```
+
+
+```{r}
+## My variables ##
+#Zscore_Reprd_index, Zscore_InfDis_index, Zscore_Mental_index, Zscore_Nutrit_index, Zscore_EnvDeath_index, Zscore_HSCR_index 
+# log_RFTP_Tr, log_BID_Tr, log_BMD_Tr, log_Malnutri_Tr, log_Env_Dth_Tr, log_HSCR_Tr, 
+# log_ODA, log_Soc_Infra, log_ODA_lag, log_Soc_Infra_lag, 
+# log_ae, log_bci, log_gov, log_CHS, log_hlth_Per_Cap, log_CF_LF_ratio, log_CRI_Score, log_Pop, log_Pop_dens, log_External_debt,
+# log_GDP_Cap, log_Trade, log_unemp, Log_Govt_Spend_1
+
+dpm_fit_1 <- dpm(log_RFTP_Tr ~ pre(log_ODA_lag), 
+               data = dpm_long_panel,
+               fixed.effects = TRUE, x.free = FALSE, # allows the regression coefficient(s) for the ldv to vary over time.
+               y.free = FALSE, se = "robust"#, 
+               # error.inv = TRUE # This assumes error constant accross wave or homoscedasticity, set to false automatically
+             #const.inv = TRUE # This constraints constant to equal across wave. Setting it to True addresses the cross-sectional dependency
+            )
+modelsummary::modelsummary(models, output = "latex")
+model_list_Raw_FE <- list(dpm_fit_1, DPM_fit)
+stargazer::stargazer(models)
+coef(dpm_fit_1)
+
+texreg::texreg(models)
+```
+```{r}
+summary(dpm(Zscore_Reprd_index ~ pre(log_ODA_lag), 
+               data = dpm_long_panel,
+               fixed.effects = TRUE, x.free = FALSE, # allows the regression coefficient(s) for the ldv to vary over time.
+               y.free = FALSE, se = "robust"#, 
+               # error.inv = TRUE # This assumes error constant accross wave or homoscedasticity, set to false automatically
+             #const.inv = TRUE # This constraints constant to equal across wave. Setting it to True addresses the cross-sectional dependency
+            ))
+
+```
+
+
+```{r}
+summary(dpm(log_RFTP_Tr ~ pre(log_ODA_lag) + log_hlth_Per_Cap,# + log_Pop, 
+               data = dpm_long_panel,
+               fixed.effects = TRUE, x.free = FALSE, # allows the regression coefficient(s) for the ldv to vary over time.
+               y.free = FALSE, 
+               error.inv = TRUE, information = "observed"))
+```
+
+
+```{r}
+summary(dpm(log_RFTP_Tr ~ pre(log_ODA_lag) + log_hlth_Per_Cap + log_Pop + ae, 
+               data = dpm_long_panel,
+               fixed.effects = TRUE, x.free = FALSE, # allows the regression coefficient(s) for the ldv to vary over time.
+               y.free = FALSE, 
+               error.inv = TRUE, information = "observed"), zstat = FALSE, ci = TRUE)
+```
+```{r}
+
+summary(dpm(log_RFTP_Tr ~ pre(log_ODA_lag) + log_Pop + log_ae + log_GDP_Cap + log_hlth_Per_Cap,# + log_gov, 
+               data = dpm_long_panel,
+               fixed.effects = TRUE, x.free = FALSE, # allows the regression coefficient(s) for the ldv to vary over time.
+               y.free = FALSE, 
+               error.inv = TRUE))
+
+```
+```{r}
+#merged_data$log_CRI_Score
+summary(dpm(log_RFTP_Tr ~ pre(log_ODA_lag) + log_Pop + log_ae + log_GDP_Cap + log_hlth_Per_Cap + FDI,# + log_gov, 
+               data = dpm_long_panel,
+               fixed.effects = TRUE, x.free = FALSE, # allows the regression coefficient(s) for the ldv to vary over time.
+               y.free = FALSE, 
+               error.inv = TRUE))
+```
+```{r}
+#hist(log(merged_data$log_CRI_Score + 1))
+summary(dpm(log_RFTP_Tr ~ pre(log_ODA_lag) + log_Pop + log_ae + log_GDP_Cap + log_hlth_Per_Cap + FDI + log_CRI_Score,
+               data = dpm_long_panel,
+               fixed.effects = TRUE, x.free = FALSE, # allows the regression coefficient(s) for the ldv to vary over time.
+               y.free = FALSE, 
+               error.inv = TRUE))
+
+```
+```{r}
+#merged_data$log_External_debt
+summary(dpm(log_RFTP_Tr ~ pre(log_ODA_lag) + log_Pop + log_ae + log_GDP_Cap + log_hlth_Per_Cap + FDI + log_CRI_Score + log_gov + log_External_debt,
+               data = dpm_long_panel,
+               fixed.effects = TRUE, x.free = FALSE, # allows the regression coefficient(s) for the ldv to vary over time.
+               y.free = FALSE, 
+               error.inv = TRUE))
+```
+```{r}
+#merged_data$log_Trade
+summary(dpm(log_RFTP_Tr ~ pre(log_ODA_lag) + log_Pop + log_ae + log_GDP_Cap + log_hlth_Per_Cap + FDI + log_CRI_Score + log_Trade + log_gov + log_External_debt,
+               data = dpm_long_panel,
+               fixed.effects = TRUE, x.free = FALSE, # allows the regression coefficient(s) for the ldv to vary over time.
+               y.free = FALSE, 
+               error.inv = TRUE))
+```
+```{r Section for Reproductive fatality and Teen Pregnancy}
+#merged_data$log_Pop_dens
+RFTP_dpm_log <- dpm(log_RFTP_Tr ~ pre(log_ODA_lag) + log_Pop + log_ae + log_GDP_Cap + log_hlth_Per_Cap + FDI + log_CRI_Score + 
+              log_Trade + log_gov + log_External_debt, # + log_Pop_dens,
+               data = dpm_long_panel,
+               fixed.effects = TRUE, x.free = FALSE, # allows the regression coefficient(s) for the ldv to vary over time.
+               y.free = FALSE, se = "robust" #error.inv = TRUE
+            ) ## This is the best so far, given the covariates
+
+summary(RFTP_dpm)
+RFTP_dpm <- dpm(Zscore_Reprd_index ~ pre(log_ODA_lag) + log_Pop + log_ae + log_GDP_Cap +  
+             FDI + log_CRI_Score + 
+              log_Trade + log_hlth_Per_Cap + log_gov + log_External_debt, # + log_Pop_dens,
+               data = dpm_long_panel,
+               fixed.effects = TRUE, x.free = FALSE, # allows the regression coefficient(s) for the ldv to vary over time.
+               y.free = FALSE, se = "robust" #error.inv = TRUE
+            ) ## This is the best so far, given the covariates
+
+```
+```{r Section for Burden of Infection and Diseases}
+#merged_data$log_Pop_dens
+BID_dpm_log <- dpm(log_BID_Tr ~ pre(log_ODA_lag) + log_Pop + log_ae + log_GDP_Cap, #+  
+             #FDI, # + log_CRI_Score + 
+              #log_Trade + log_hlth_Per_Cap + log_gov + log_External_debt, # + log_Pop_dens,
+               data = dpm_long_panel,
+               fixed.effects = TRUE, x.free = FALSE, # allows the regression coefficient(s) for the ldv to vary over time.
+               y.free = FALSE, se = "robust" #error.inv = TRUE
+            ) ## This is the best so far, given the covariates
+
+summary(BID_dpm_log)
+BID_dpm <- dpm(Zscore_Nutrit_index ~ pre(log_ODA_lag) + log_Pop + log_ae + log_GDP_Cap +  
+             FDI + log_CRI_Score + 
+              log_Trade + log_hlth_Per_Cap + log_gov + log_External_debt, # + log_Pop_dens,
+               data = dpm_long_panel,
+               fixed.effects = TRUE, x.free = FALSE, # allows the regression coefficient(s) for the ldv to vary over time.
+               y.free = FALSE, se = "robust" #error.inv = TRUE
+            ) ## This is the best so far, given the covariates
+
+```
+
+
+```{r}
+DV_vars <- c("Zscore_Reprd_index", "Zscore_InfDis_index", #"Zscore_Mental_index", 
+             "Zscore_Nutrit_index", "Zscore_EnvDeath_index", "Zscore_HSCR_index") 
+DV_vars <- c("log_RFTP_Tr", "log_BID_Tr", "log_BMD_Tr", "log_Malnutri_Tr", "log_Env_Dth_Tr", "log_HSCR_T")
+
+dpm_function <- function(DV) {
+  model_sp <- as.formula(paste(DV, "~ pre(log_ODA_lag) + log_Pop + log_ae + log_hlth_Per_Cap + log_GDP_Cap + log_hlth_Per_Cap + FDI + log_CRI_Score + log_Trade + log_gov + log_External_debt"))
+  
+  result <- dpm::dpm(model_sp, data = dpm_long_panel,
+                     fixed.effects = TRUE, x.free = FALSE,
+                     y.free = FALSE, se = "robust")
+  return(result)
+}
+
+
+
+# Initialize an empty list to store models
+
+model_list <- list()
+# Loop through each DV variable
+for (var in DV_vars) {
+  DPM_models <- dpm_function(var)
+  model_list[[var]] <- DPM_models
+  overleaf_code <- texreg::texreg(model_list)
+cat(overleaf_code, "\n\n")
+}
+
+
+  #  + log_hlth_Per_Cap + FDI + log_CRI_Score + log_Trade + log_gov + log_External_debt"
+# log_RFTP_Tr, log_BID_Tr, log_BMD_Tr, log_Malnutri_Tr, log_Env_Dth_Tr, log_HSCR_Tr, 
+# log_ODA, log_Soc_Infra, log_ODA_lag, log_Soc_Infra_lag, 
+# log_ae, log_bci, log_gov, log_CHS, log_hlth_Per_Cap, log_CF_LF_ratio, log_CRI_Score, log_Pop, log_Pop_dens, log_External_debt,
+# log_GDP_Cap, log_Trade, log_unemp, Log_Govt_Spend_1
+```
+```{r}
+DV_vars <- c("Zscore_Reprd_index", "Zscore_InfDis_index", "Zscore_Mental_index", 
+             "Zscore_Nutrit_index", "Zscore_EnvDeath_index", "Zscore_HSCR_index") 
+DV_vars <- c("log_RFTP_Tr", "log_BID_Tr", "log_BMD_Tr", "log_Malnutri_Tr", "log_Env_Dth_Tr", "log_HSCR_T")
+
+DPM_RFTP <- dpm_function("log_RFTP_Tr")
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
